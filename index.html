@@ -46,6 +46,11 @@
     .token{background:#0a1222; border:1px dashed #334155; border-radius:12px; padding:10px; display:flex; gap:8px; align-items:center; cursor:grab}
     .token span.emoji{font-size:20px}
     .token small{display:block; color:var(--muted)}
+    /* highlight the token that’s selected for tap-to-place */
+    .token.selected{
+      border-color:#22d3ee;
+      box-shadow:0 0 0 2px rgba(34,211,238,.25) inset, 0 0 0 1px #22d3ee;
+    }
 
     .button-row{display:flex; gap:10px; margin-top:6px}
     button{background:#0ea5e9; border:none; padding:10px 12px; color:white; border-radius:10px; cursor:pointer; font-weight:600}
@@ -77,7 +82,6 @@
     .bar[data-state="bad"]{background: linear-gradient(180deg,#ef4444,#ef4444)}
 
     .cell .label{position:absolute; top:6px; left:6px; font-size:11px; color:#93c5fd}
-    /* NEW: show token icon within each cell */
     .cell .icon{position:absolute; top:6px; right:6px; font-size:18px; line-height:1; pointer-events:none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));}
 
     .drop-hint{position:absolute; inset:0; border:2px dashed #22d3ee; border-radius:12px; display:none}
@@ -91,7 +95,7 @@
 <body>
   <header>
     <h1>🏖️ Littoral Cell Balancer</h1>
-    <span class="pill">Drag sources / pathways / sinks onto the coast. Tune waves. Survive a season.</span>
+    <span class="pill">Drag or tap-to-place sources / pathways / sinks. Tune waves. Survive a season.</span>
   </header>
 
   <div class="wrap">
@@ -108,7 +112,7 @@
         </div>
 
         <div class="control" aria-label="Tokens">
-          <label><span>Drag a token to a cell</span><span>Shift+Click to place</span></label>
+          <label><span>Drag a token to a cell</span><span id="placeHint">Shift+Click to place</span></label>
           <div class="tokens">
             <div class="token" draggable="true" data-type="river" tabindex="0" aria-label="River source">
               <span class="emoji">🏞️</span>
@@ -167,7 +171,6 @@
   <template id="cellTmpl">
     <div class="cell" role="gridcell" tabindex="0">
       <div class="label"></div>
-      <!-- NEW: per-cell token icon -->
       <div class="icon" aria-hidden="true"></div>
       <div class="bar" style="height:60%" data-state="good"></div>
     </div>
@@ -187,7 +190,7 @@
 
     let tickHandle = null;              // animation handle
     let timeLeft = 30;                  // seconds per season
-    let lastGrabbed = null;             // last grabbed token type for keyboard place
+    let lastGrabbed = null;             // last grabbed token type for keyboard/tap place
 
     const els = {
       coast: document.getElementById('coast'),
@@ -203,8 +206,16 @@
       stormVal: document.getElementById('stormVal'),
       driftDir: document.getElementById('driftDir'),
       score: document.getElementById('score'),
-      log: document.getElementById('log')
+      log: document.getElementById('log'),
+      placeHint: document.getElementById('placeHint')
     };
+
+    // ---- Touch support & selection highlight ----
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    function selectTokenEl(el){
+      document.querySelectorAll('.token.selected').forEach(n=>n.classList.remove('selected'));
+      if(el){ el.classList.add('selected'); }
+    }
 
     // Tiny helper so clicking tokens doesn't error out
     function flash(msg){ try { logAction(msg); } catch(e){} }
@@ -212,6 +223,8 @@
     // Build grid
     function buildGrid(){
       els.coast.innerHTML='';
+      // keep CSS grid columns synced to N (helps if you change N later)
+      els.coast.style.setProperty('--cols', N);
       for(let i=0;i<N;i++){
         const node = els.cellTmpl.content.firstElementChild.cloneNode(true);
         node.dataset.index=i;
@@ -226,24 +239,48 @@
             removeToken(idx);
           }
         });
+        // Click to place (desktop) and tap to place (mobile)
+        node.addEventListener('click', ()=>{
+          const idx = +node.dataset.index;
+          if(lastGrabbed){ placeToken(idx, lastGrabbed); }
+        });
+        node.addEventListener('touchend', (e)=>{
+          e.preventDefault();
+          const idx = +node.dataset.index;
+          if(lastGrabbed){ placeToken(idx, lastGrabbed); }
+        }, { passive:false });
+
         els.coast.appendChild(node);
       }
       updateBars();
     }
 
-    // Token drag
+    // Token drag/tap
     document.querySelectorAll('.token').forEach(t=>{
+      // Desktop/laptop drag
       t.addEventListener('dragstart', e=>{
         e.dataTransfer.setData('text/plain', t.dataset.type);
         lastGrabbed = t.dataset.type;
+        selectTokenEl(t);
       });
-      t.addEventListener('click', ()=>{ lastGrabbed = t.dataset.type; flash(`Selected token: ${labelOf(lastGrabbed)}`); });
+      // Mouse click (desktop): select token
+      t.addEventListener('click', ()=>{
+        lastGrabbed = t.dataset.type;
+        selectTokenEl(t);
+        flash(`Selected token: ${labelOf(lastGrabbed)}`);
+      });
+      // Touch (iPhone/iPad): tap to select; then tap a cell to place
+      t.addEventListener('touchstart', (e)=>{
+        e.preventDefault(); // block long-press/scroll gesture
+        lastGrabbed = t.dataset.type;
+        selectTokenEl(t);
+        flash(`Selected token: ${labelOf(lastGrabbed)} — tap a cell to place`);
+      }, { passive:false });
     });
 
     function labelOf(type){
       return ({river:'River', erosion:'Cliff Erosion', groyne:'Groyne', harbour:'Harbour'})[type] || type;
     }
-    // NEW: token -> emoji mapper
     function emojiOf(type){
       return ({river:'🏞️', erosion:'⛰️', groyne:'🧱', harbour:'⚓'})[type] || '';
     }
@@ -289,6 +326,8 @@
       timeLeft = 30;
       els.start.disabled = true; els.reset.disabled = true;
       tickHandle = setInterval(tick, 250); // 4 ticks per second
+      // clear any selection highlight
+      selectTokenEl(null);
     }
 
     function stopSeason(){
@@ -306,6 +345,8 @@
       els.score.textContent = 'Score: 0';
       els.log.innerHTML = '';
       localStorage.setItem('littoral_log', '');
+      lastGrabbed = null;
+      selectTokenEl(null);
     }
 
     function tick(){
@@ -377,12 +418,12 @@
         const v = coast[i].vol;
         const pct = Math.max(0, Math.min(180, (v/baseline)*100));
         const bar = cell.querySelector('.bar');
-        const icon = cell.querySelector('.icon'); // NEW
-        bar.style.height = `${pct * 1.2 / 2}%`; // scale visual height
+        const icon = cell.querySelector('.icon');
+        bar.style.height = `${pct * 0.6}%`; // visual scale (0–108% max, but clamp at container)
         const dev = (v - baseline)/baseline;
         const state = (dev < -0.15) ? 'bad' : (Math.abs(dev) <= 0.10 ? 'good' : 'warn');
         bar.dataset.state = state;
-        icon.textContent = emojiOf(coast[i].token); // NEW: set/clear icon
+        icon.textContent = emojiOf(coast[i].token);
         cell.title = tokenTooltip(i, dev);
       });
     }
@@ -416,6 +457,8 @@
 
     // init
     buildGrid();
+    // mobile hint
+    if(isTouch && els.placeHint){ els.placeHint.textContent = 'Tap a token, then tap a cell'; }
     els.waveH.dispatchEvent(new Event('input'));
     els.waveA.dispatchEvent(new Event('input'));
     els.storm.dispatchEvent(new Event('input'));
