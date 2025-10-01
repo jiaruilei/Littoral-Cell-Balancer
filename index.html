@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Littoral Cell Balancer</title>
+  <style>
+    :root{
+      --bg:#0f172a; /* slate-900 */
+      --panel:#111827; /* gray-900 */
+      --card:#1f2937; /* gray-800 */
+      --text:#e5e7eb; /* gray-200 */
+      --muted:#9ca3af; /* gray-400 */
+      --accent:#22d3ee; /* cyan-400 */
+      --good:#22c55e; /* green-500 */
+      --warn:#f59e0b; /* amber-500 */
+      --bad:#ef4444; /* red-500 */
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; 
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background: radial-gradient(1200px 600px at 60% 10%, #1f2937 0%, #0b1022 60%, #050816 100%);
+      color:var(--text);
+    }
+    header{
+      display:flex; gap:12px; align-items:center; padding:16px 20px; border-bottom:1px solid #1f2937;
+    }
+    header h1{font-size:20px; margin:0}
+    header .pill{border:1px solid #334155; padding:6px 10px; border-radius:999px; color:var(--muted); font-size:12px}
+
+    .wrap{
+      display:grid; grid-template-columns: 320px 1fr; gap:16px; padding:16px; min-height: calc(100dvh - 64px);
+    }
+    .panel{
+      background:linear-gradient(180deg,#0e1328, #0b1224);
+      border:1px solid #1f2a44; border-radius:16px; padding:16px; position:relative; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    .panel h2{font-size:16px; margin:0 0 8px 0; color:#cbd5e1}
+    .controls{display:grid; gap:14px}
+    .control{background: #0e172a; border:1px solid #1f2a44; border-radius:12px; padding:12px}
+    .control label{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:6px}
+    .control input[type=range]{width:100%}
+
+    .tokens{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+    .token{background:#0a1222; border:1px dashed #334155; border-radius:12px; padding:10px; display:flex; gap:8px; align-items:center; cursor:grab}
+    .token span.emoji{font-size:20px}
+    .token small{display:block; color:var(--muted)}
+
+    .button-row{display:flex; gap:10px; margin-top:6px}
+    button{background:#0ea5e9; border:none; padding:10px 12px; color:white; border-radius:10px; cursor:pointer; font-weight:600}
+    button.secondary{background:#0b1224; border:1px solid #1f2a44; color:#e2e8f0}
+    button:disabled{opacity:.6; cursor:not-allowed}
+
+    .board{
+      background:linear-gradient(180deg,#061022 0%, #06162c 100%);
+      border:1px solid #1f2a44; border-radius:16px; padding:16px; position:relative;
+      display:grid; grid-template-rows:auto 1fr auto; gap:12px;
+    }
+    .hud{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
+    .badge{border:1px solid #1f2a44; padding:6px 10px; border-radius:999px; color:#cbd5e1; font-size:12px}
+
+    .coast{
+      --cols:12; 
+      display:grid; grid-template-columns: repeat(var(--cols), 1fr); gap:6px; height:360px; align-items:end; 
+      background:
+        radial-gradient(600px 220px at 50% -140px, rgba(34,211,238,.2), transparent 60%),
+        linear-gradient(180deg, rgba(2,132,199,.25) 0%, rgba(3,105,161,.15) 50%, rgba(2,6,23,.0) 100%);
+      border-radius:12px; padding:16px; border:1px solid #1f2937;
+      user-select:none;
+    }
+    .cell{position:relative; height:100%; display:flex; align-items:flex-end; justify-content:center; border-radius:8px; border:1px solid #0b162a; background: linear-gradient(180deg, rgba(15,23,42,.4), rgba(2,6,23,.2));}
+    .cell:focus{outline:2px solid #22d3ee; outline-offset:2px}
+    .bar{width:85%; border-radius:6px 6px 0 0; background:linear-gradient(180deg,#ca8a04, #d97706); box-shadow: inset 0 0 0 1px rgba(0,0,0,.35)}
+    .bar[data-state="good"]{background: linear-gradient(180deg,#16a34a,#16a34a)}
+    .bar[data-state="warn"]{background: linear-gradient(180deg,#f59e0b,#f59e0b)}
+    .bar[data-state="bad"]{background: linear-gradient(180deg,#ef4444,#ef4444)}
+
+    .cell .label{position:absolute; top:6px; left:6px; font-size:11px; color:#93c5fd}
+    /* NEW: show token icon within each cell */
+    .cell .icon{position:absolute; top:6px; right:6px; font-size:18px; line-height:1; pointer-events:none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));}
+
+    .drop-hint{position:absolute; inset:0; border:2px dashed #22d3ee; border-radius:12px; display:none}
+
+    .legend{display:flex; gap:12px; align-items:center; flex-wrap:wrap; font-size:12px; color:var(--muted)}
+    .swatch{width:12px; height:12px; border-radius:3px; display:inline-block; vertical-align:middle; margin-right:6px}
+
+    .log{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; color:#a5b4fc; background:#0b1224; border:1px solid #1f2a44; border-radius:10px; padding:10px; height:120px; overflow:auto}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🏖️ Littoral Cell Balancer</h1>
+    <span class="pill">Drag sources / pathways / sinks onto the coast. Tune waves. Survive a season.</span>
+  </header>
+
+  <div class="wrap">
+    <aside class="panel" aria-label="Controls">
+      <h2>Controls</h2>
+      <div class="controls">
+        <div class="control">
+          <label for="waveH"><span>Wave height Hs (m)</span><span id="waveHVal">1.0</span></label>
+          <input id="waveH" type="range" min="0.5" max="3.0" step="0.1" value="1.0" />
+          <label for="waveAngle"><span>Wave approach θ (° from shore-normal)</span><span id="waveAngVal">10°</span></label>
+          <input id="waveAngle" type="range" min="0" max="40" step="1" value="10" />
+          <label for="storm"><span>Storminess (cross-shore loss)</span><span id="stormVal">Off</span></label>
+          <input id="storm" type="range" min="0" max="2" step="1" value="0" />
+        </div>
+
+        <div class="control" aria-label="Tokens">
+          <label><span>Drag a token to a cell</span><span>Shift+Click to place</span></label>
+          <div class="tokens">
+            <div class="token" draggable="true" data-type="river" tabindex="0" aria-label="River source">
+              <span class="emoji">🏞️</span>
+              <div><strong>River</strong><small>+ supply at cell</small></div>
+            </div>
+            <div class="token" draggable="true" data-type="erosion" tabindex="0" aria-label="Erosion source">
+              <span class="emoji">⛰️</span>
+              <div><strong>Cliff Erosion</strong><small>+ supply (episodic)</small></div>
+            </div>
+            <div class="token" draggable="true" data-type="groyne" tabindex="0" aria-label="Groyne pathway modifier">
+              <span class="emoji">🧱</span>
+              <div><strong>Groyne</strong><small>traps / blocks drift</small></div>
+            </div>
+            <div class="token" draggable="true" data-type="harbour" tabindex="0" aria-label="Harbour sink">
+              <span class="emoji">⚓</span>
+              <div><strong>Harbour</strong><small>sink (maintenance dredge)</small></div>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="startBtn">▶ Run Season (30s)</button>
+            <button id="resetBtn" class="secondary">↺ Clear Map</button>
+          </div>
+        </div>
+
+        <div class="control">
+          <label><span>Season status</span><span id="timer">Ready</span></label>
+          <div class="legend">
+            <span><span class="swatch" style="background:#16a34a"></span>balanced</span>
+            <span><span class="swatch" style="background:#f59e0b"></span>stressed</span>
+            <span><span class="swatch" style="background:#ef4444"></span>deficit</span>
+          </div>
+        </div>
+
+        <div class="control">
+          <label><span>Round log</span><span id="score">Score: 0</span></label>
+          <div id="log" class="log" aria-live="polite"></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="board" aria-label="Board">
+      <div class="hud">
+        <span class="badge" id="driftDir">Net drift: → (right)</span>
+        <span class="badge">Goal: keep all cells within ±10% of baseline</span>
+        <span class="badge">Place tokens thoughtfully — groynes trap updrift; harbours remove sand</span>
+      </div>
+
+      <section id="coast" class="coast" aria-label="Coast grid" role="grid"></section>
+
+      <div class="legend">
+        <span>Keyboard: Tab to a cell → Shift+Enter to place last grabbed token; Del to remove token on cell.</span>
+      </div>
+    </main>
+  </div>
+
+  <template id="cellTmpl">
+    <div class="cell" role="gridcell" tabindex="0">
+      <div class="label"></div>
+      <!-- NEW: per-cell token icon -->
+      <div class="icon" aria-hidden="true"></div>
+      <div class="bar" style="height:60%" data-state="good"></div>
+    </div>
+  </template>
+
+  <script>
+    /* ----------------------
+       Simple coastal cell model
+       ---------------------- */
+    const N = 12;                       // number of alongshore cells
+    const baseline = 100;               // baseline sediment volume per cell
+    const coast = Array.from({length:N}, ()=>({vol:baseline, token:null}));
+    const K = 0.09;                     // transport coefficient (arbitrary units)
+    const trapEff = 0.6;                // groyne trapping efficiency
+    const sinkRate = 0.8;               // harbour sink strength (units/tick)
+    const sourceRate = 0.9;             // river/cliff supply (units/tick)
+
+    let tickHandle = null;              // animation handle
+    let timeLeft = 30;                  // seconds per season
+    let lastGrabbed = null;             // last grabbed token type for keyboard place
+
+    const els = {
+      coast: document.getElementById('coast'),
+      cellTmpl: document.getElementById('cellTmpl'),
+      start: document.getElementById('startBtn'),
+      reset: document.getElementById('resetBtn'),
+      timer: document.getElementById('timer'),
+      waveH: document.getElementById('waveH'),
+      waveA: document.getElementById('waveAngle'),
+      storm: document.getElementById('storm'),
+      waveHVal: document.getElementById('waveHVal'),
+      waveAngVal: document.getElementById('waveAngVal'),
+      stormVal: document.getElementById('stormVal'),
+      driftDir: document.getElementById('driftDir'),
+      score: document.getElementById('score'),
+      log: document.getElementById('log')
+    };
+
+    // Tiny helper so clicking tokens doesn't error out
+    function flash(msg){ try { logAction(msg); } catch(e){} }
+
+    // Build grid
+    function buildGrid(){
+      els.coast.innerHTML='';
+      for(let i=0;i<N;i++){
+        const node = els.cellTmpl.content.firstElementChild.cloneNode(true);
+        node.dataset.index=i;
+        node.querySelector('.label').textContent = i+1;
+        node.addEventListener('dragover', e=> e.preventDefault());
+        node.addEventListener('drop', onDrop);
+        node.addEventListener('keydown', e=>{
+          const idx = +node.dataset.index;
+          if(e.shiftKey && (e.key === 'Enter')){
+            if(lastGrabbed) placeToken(idx, lastGrabbed);
+          } else if(e.key === 'Delete'){
+            removeToken(idx);
+          }
+        });
+        els.coast.appendChild(node);
+      }
+      updateBars();
+    }
+
+    // Token drag
+    document.querySelectorAll('.token').forEach(t=>{
+      t.addEventListener('dragstart', e=>{
+        e.dataTransfer.setData('text/plain', t.dataset.type);
+        lastGrabbed = t.dataset.type;
+      });
+      t.addEventListener('click', ()=>{ lastGrabbed = t.dataset.type; flash(`Selected token: ${labelOf(lastGrabbed)}`); });
+    });
+
+    function labelOf(type){
+      return ({river:'River', erosion:'Cliff Erosion', groyne:'Groyne', harbour:'Harbour'})[type] || type;
+    }
+    // NEW: token -> emoji mapper
+    function emojiOf(type){
+      return ({river:'🏞️', erosion:'⛰️', groyne:'🧱', harbour:'⚓'})[type] || '';
+    }
+
+    function onDrop(e){
+      e.preventDefault();
+      const type = e.dataTransfer.getData('text/plain') || lastGrabbed;
+      const idx = +e.currentTarget.dataset.index;
+      placeToken(idx, type);
+    }
+
+    function placeToken(idx, type){
+      if(!type) return;
+      coast[idx].token = type;
+      logAction(`Placed ${labelOf(type)} at cell ${idx+1}`);
+      updateBars();
+    }
+
+    function removeToken(idx){
+      const old = coast[idx].token; if(!old) return;
+      coast[idx].token = null;
+      logAction(`Removed ${labelOf(old)} from cell ${idx+1}`);
+      updateBars();
+    }
+
+    // UI bindings
+    els.waveH.addEventListener('input', ()=>{
+      els.waveHVal.textContent = (+els.waveH.value).toFixed(1);
+    });
+    els.waveA.addEventListener('input', ()=>{
+      els.waveAngVal.textContent = `${+els.waveA.value}\u00B0`;
+      els.driftDir.textContent = `Net drift: ${(Math.sin(2*deg2rad(+els.waveA.value))>=0)? '→ (right)': '← (left)'}`;
+    });
+    els.storm.addEventListener('input', ()=>{
+      els.stormVal.textContent = ['Off','Moderate','Severe'][+els.storm.value];
+    });
+
+    els.start.addEventListener('click', startSeason);
+    els.reset.addEventListener('click', ()=>{ reset(true); });
+
+    function startSeason(){
+      if(tickHandle) return;
+      timeLeft = 30;
+      els.start.disabled = true; els.reset.disabled = true;
+      tickHandle = setInterval(tick, 250); // 4 ticks per second
+    }
+
+    function stopSeason(){
+      clearInterval(tickHandle); tickHandle = null;
+      els.start.disabled = false; els.reset.disabled = false;
+    }
+
+    function reset(clearTokens=false){
+      for(let i=0;i<N;i++){
+        coast[i].vol = baseline;
+        if(clearTokens) coast[i].token = null;
+      }
+      updateBars();
+      els.timer.textContent = 'Ready';
+      els.score.textContent = 'Score: 0';
+      els.log.innerHTML = '';
+      localStorage.setItem('littoral_log', '');
+    }
+
+    function tick(){
+      // reduce timer
+      timeLeft -= 0.25;
+      els.timer.textContent = `${Math.max(0, timeLeft).toFixed(1)} s left`;
+
+      // compute longshore transport base (CERC-like sensitivity to H and angle)
+      const H = +els.waveH.value;
+      const theta = deg2rad(+els.waveA.value);
+      const storm = +els.storm.value; // 0,1,2
+      const Q0 = K * H*H * Math.sin(2*theta); // signed: + → right, − → left
+
+      // apply cross-shore seasonal loss (storminess)
+      const crossLoss = (storm * 0.3) * H; // units per tick per cell
+
+      // copy volumes to compute fluxes
+      const newVol = coast.map(c => c.vol);
+
+      for(let i=0;i<N;i++){
+        // local sources/sinks
+        if(coast[i].token === 'river') newVol[i] += sourceRate;
+        if(coast[i].token === 'erosion') newVol[i] += sourceRate * (storm?1.2:0.6); // more during storms
+        if(coast[i].token === 'harbour') newVol[i] -= sinkRate;
+
+        // cross-shore
+        newVol[i] -= crossLoss;
+      }
+
+      // alongshore transport between cells
+      const dir = Math.sign(Q0);
+      const fluxMag = Math.abs(Q0);
+      if(dir !== 0){
+        if(dir > 0){
+          // rightward transport from i to i+1
+          for(let i=0;i<N-1;i++){
+            let flux = fluxMag;
+            // groyne at i reduces outgoing (deposition updrift)
+            if(coast[i].token === 'groyne'){ newVol[i] += flux * trapEff; flux *= (1-trapEff); }
+            newVol[i] -= flux; newVol[i+1] += flux;
+          }
+        } else {
+          // leftward transport from i to i-1
+          for(let i=N-1;i>0;i--){
+            let flux = fluxMag;
+            if(coast[i].token === 'groyne'){ newVol[i] += flux * trapEff; flux *= (1-trapEff); }
+            newVol[i] -= flux; newVol[i-1] += flux;
+          }
+        }
+      }
+
+      // update volumes (non-negative)
+      for(let i=0;i<N;i++) coast[i].vol = Math.max(0, newVol[i]);
+      updateBars();
+
+      if(timeLeft <= 0){
+        stopSeason();
+        const s = computeScore();
+        els.score.textContent = `Score: ${s}`;
+        logAction(`Season ended. Score ${s}.`);
+
+        // persist simple round log
+        try{ localStorage.setItem('littoral_log', (localStorage.getItem('littoral_log')||'') + `\n${new Date().toISOString()}|score=${s}`);}catch{}
+      }
+    }
+
+    function updateBars(){
+      [...els.coast.children].forEach((cell,i)=>{
+        const v = coast[i].vol;
+        const pct = Math.max(0, Math.min(180, (v/baseline)*100));
+        const bar = cell.querySelector('.bar');
+        const icon = cell.querySelector('.icon'); // NEW
+        bar.style.height = `${pct * 1.2 / 2}%`; // scale visual height
+        const dev = (v - baseline)/baseline;
+        const state = (dev < -0.15) ? 'bad' : (Math.abs(dev) <= 0.10 ? 'good' : 'warn');
+        bar.dataset.state = state;
+        icon.textContent = emojiOf(coast[i].token); // NEW: set/clear icon
+        cell.title = tokenTooltip(i, dev);
+      });
+    }
+
+    function tokenTooltip(i, dev){
+      const t = coast[i].token ? `Token: ${labelOf(coast[i].token)}` : 'No token';
+      const d = (dev*100).toFixed(0);
+      return `Cell ${i+1} — ${t}\nDeviation: ${d}%`;
+    }
+
+    function computeScore(){
+      // sum of penalties for deficits beyond -10%
+      let penalty = 0;
+      for(const c of coast){
+        const dev = (c.vol - baseline)/baseline;
+        if(dev < -0.10) penalty += Math.abs(dev + 0.10);
+      }
+      // reward for keeping most cells balanced
+      const balanced = coast.filter(c=> Math.abs((c.vol-baseline)/baseline) <= 0.10).length;
+      const score = Math.round(100 + balanced*5 - penalty*200);
+      return Math.max(0, score);
+    }
+
+    function deg2rad(a){return a*Math.PI/180}
+
+    function logAction(s){
+      const line = `[t=${(30-timeLeft).toFixed(1)}] ${s}`;
+      els.log.textContent += (els.log.textContent?"\n":"") + line;
+      els.log.scrollTop = els.log.scrollHeight;
+    }
+
+    // init
+    buildGrid();
+    els.waveH.dispatchEvent(new Event('input'));
+    els.waveA.dispatchEvent(new Event('input'));
+    els.storm.dispatchEvent(new Event('input'));
+
+  </script>
+</body>
+</html>
